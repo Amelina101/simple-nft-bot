@@ -15,66 +15,72 @@ bot = telebot.TeleBot(BOT_TOKEN)
 def generate_trade_id():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-# База данных
+# База данных - УЛУЧШЕННАЯ ВЕРСИЯ
 def init_db():
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    
-    # Таблица сделок
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS trades (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_unique_id TEXT UNIQUE,
-            seller_id INTEGER,
-            seller_username TEXT,
-            buyer_id INTEGER,
-            buyer_username TEXT,
-            nft_url TEXT,
-            description TEXT,
-            price REAL,
-            currency TEXT,
-            status TEXT DEFAULT 'waiting_payment',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Таблица пользователей (балансы)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            balance_rub REAL DEFAULT 0,
-            balance_usd REAL DEFAULT 0,
-            balance_byn REAL DEFAULT 0,
-            balance_kzt REAL DEFAULT 0,
-            balance_uah REAL DEFAULT 0,
-            stars INTEGER DEFAULT 0,
-            card_number TEXT,
-            is_admin BOOLEAN DEFAULT FALSE
-        )
-    ''')
-    
-    # Таблица транзакций
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            trade_id INTEGER,
-            user_id INTEGER,
-            amount REAL,
-            currency TEXT,
-            status TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Создаем администратора
-    cursor.execute('''
-        INSERT OR IGNORE INTO users (user_id, username, is_admin)
-        VALUES (?, 'admin', TRUE)
-    ''', (ADMIN_ID,))
-    
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        # Таблица сделок
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_unique_id TEXT UNIQUE,
+                seller_id INTEGER,
+                seller_username TEXT,
+                buyer_id INTEGER,
+                buyer_username TEXT,
+                nft_url TEXT,
+                description TEXT,
+                price REAL,
+                currency TEXT,
+                status TEXT DEFAULT 'waiting_payment',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Таблица пользователей (балансы)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                balance_rub REAL DEFAULT 0,
+                balance_usd REAL DEFAULT 0,
+                balance_byn REAL DEFAULT 0,
+                balance_kzt REAL DEFAULT 0,
+                balance_uah REAL DEFAULT 0,
+                stars INTEGER DEFAULT 0,
+                card_number TEXT,
+                is_admin BOOLEAN DEFAULT FALSE
+            )
+        ''')
+        
+        # Таблица транзакций
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id INTEGER,
+                user_id INTEGER,
+                amount REAL,
+                currency TEXT,
+                status TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Создаем администратора
+        cursor.execute('''
+            INSERT OR IGNORE INTO users (user_id, username, is_admin)
+            VALUES (?, 'admin', TRUE)
+        ''', (ADMIN_ID,))
+        
+        conn.commit()
+        conn.close()
+        print("✅ База данных инициализирована")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка инициализации БД: {e}")
+        return False
 
 # Словарь для временного хранения данных
 user_data = {}
@@ -89,19 +95,25 @@ CURRENCIES = {
     'uah': '🇺🇦 UAH (Гривны)'
 }
 
-# Главное меню
+# Главное меню - С УЛУЧШЕННОЙ ИНИЦИАЛИЗАЦИЕЙ
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    init_db()
+    if not init_db():
+        bot.send_message(message.chat.id, "❌ Ошибка системы. Попробуйте позже.")
+        return
+    
     user_id = message.from_user.id
     
     # Регистрируем пользователя если его нет
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', 
-                   (user_id, f"@{message.from_user.username}" if message.from_user.username else "Без username"))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', 
+                       (user_id, f"@{message.from_user.username}" if message.from_user.username else "Без username"))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"❌ Ошибка регистрации пользователя: {e}")
     
     if len(message.text.split()) > 1:
         command = message.text.split()[1]
@@ -128,41 +140,44 @@ def send_welcome(message):
 @bot.message_handler(func=lambda message: message.text == '💳 Баланс')
 def show_balance(message):
     user_id = message.from_user.id
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
-    user = cursor.fetchone()
-    conn.close()
-    
-    if user:
-        user_id, username, rub, usd, byn, kzt, uah, stars, card, is_admin = user
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
+        user = cursor.fetchone()
+        conn.close()
         
-        balance_text = (
-            f"💰 *Ваш баланс:*\n\n"
-            f"⭐ Звезды: `{stars}`\n"
-            f"🇷🇺 RUB: `{rub}`\n"
-            f"🇺🇸 USD: `{usd}`\n"
-            f"🇧🇾 BYN: `{byn}`\n"
-            f"🇰🇿 KZT: `{kzt}`\n"
-            f"🇺🇦 UAH: `{uah}`\n\n"
-        )
-        
-        if card:
-            balance_text += f"💳 Привязанная карта: `{card}`\n\n"
-        
-        if is_admin:
-            balance_text += "👑 *Статус: АДМИНИСТРАТОР*\n💎 Баланс: Безлимитный"
-        else:
-            balance_text += "💡 Для пополнения баланса используйте команду /deposit"
-        
-        markup = types.InlineKeyboardMarkup()
-        markup.row(
-            types.InlineKeyboardButton('💳 Привязать карту', callback_data='bind_card'),
-            types.InlineKeyboardButton('⭐ Пополнить звезды', callback_data='add_stars')
-        )
-        
-        bot.send_message(message.chat.id, balance_text, reply_markup=markup, parse_mode='Markdown')
+        if user:
+            user_id, username, rub, usd, byn, kzt, uah, stars, card, is_admin = user
+            
+            balance_text = (
+                f"💰 *Ваш баланс:*\n\n"
+                f"⭐ Звезды: `{stars}`\n"
+                f"🇷🇺 RUB: `{rub}`\n"
+                f"🇺🇸 USD: `{usd}`\n"
+                f"🇧🇾 BYN: `{byn}`\n"
+                f"🇰🇿 KZT: `{kzt}`\n"
+                f"🇺🇦 UAH: `{uah}`\n\n"
+            )
+            
+            if card:
+                balance_text += f"💳 Привязанная карта: `{card}`\n\n"
+            
+            if is_admin:
+                balance_text += "👑 *Статус: АДМИНИСТРАТОР*\n💎 Баланс: Безлимитный"
+            else:
+                balance_text += "💡 Для пополнения баланса используйте команду /deposit"
+            
+            markup = types.InlineKeyboardMarkup()
+            markup.row(
+                types.InlineKeyboardButton('💳 Привязать карту', callback_data='bind_card'),
+                types.InlineKeyboardButton('⭐ Пополнить звезды', callback_data='add_stars')
+            )
+            
+            bot.send_message(message.chat.id, balance_text, reply_markup=markup, parse_mode='Markdown')
+    except Exception as e:
+        bot.send_message(message.chat.id, "❌ Ошибка загрузки баланса")
+        print(f"❌ Ошибка показа баланса: {e}")
 
 # Привязка карты
 @bot.callback_query_handler(func=lambda call: call.data == 'bind_card')
@@ -179,13 +194,16 @@ def process_card_number(message):
         bot.register_next_step_handler(msg, process_card_number)
         return
     
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    cursor.execute('UPDATE users SET card_number = ? WHERE user_id = ?', (card_number, user_id))
-    conn.commit()
-    conn.close()
-    
-    bot.send_message(message.chat.id, "✅ Карта успешно привязана!")
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        cursor.execute('UPDATE users SET card_number = ? WHERE user_id = ?', (card_number, user_id))
+        conn.commit()
+        conn.close()
+        
+        bot.send_message(message.chat.id, "✅ Карта успешно привязана!")
+    except Exception as e:
+        bot.send_message(message.chat.id, "❌ Ошибка привязки карты")
 
 # Создание сделки
 @bot.message_handler(func=lambda message: message.text == '🎁 Создать сделку')
@@ -324,409 +342,155 @@ def handle_trade_confirmation(call):
 
 # Сохранение сделки в базу
 def save_trade_to_db(user_id, trade_data):
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    
-    username = f"@{bot.get_chat(user_id).username}" if bot.get_chat(user_id).username else "Без username"
-    
-    cursor.execute('''
-        INSERT INTO trades (trade_unique_id, seller_id, seller_username, nft_url, description, price, currency)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (trade_data['trade_unique_id'], user_id, username,
-          trade_data['nft_url'], trade_data['description'], 
-          trade_data['price'], trade_data['currency']))
-    
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        username = f"@{bot.get_chat(user_id).username}" if bot.get_chat(user_id).username else "Без username"
+        
+        cursor.execute('''
+            INSERT INTO trades (trade_unique_id, seller_id, seller_username, nft_url, description, price, currency)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (trade_data['trade_unique_id'], user_id, username,
+              trade_data['nft_url'], trade_data['description'], 
+              trade_data['price'], trade_data['currency']))
+        
+        conn.commit()
+        conn.close()
+        print(f"✅ Сделка сохранена: {trade_data['trade_unique_id']}")
+    except Exception as e:
+        print(f"❌ Ошибка сохранения сделки: {e}")
 
 # Присоединение к сделке
 def join_trade(message, trade_unique_id):
     user_id = message.from_user.id
     username = f"@{message.from_user.username}" if message.from_user.username else "Без username"
     
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM trades WHERE trade_unique_id = ?', (trade_unique_id,))
-    trade = cursor.fetchone()
-    
-    if not trade:
-        bot.send_message(message.chat.id, "❌ Сделка не найдена")
-        conn.close()
-        return
-    
-    trade_id, trade_unique_id, seller_id, seller_username, buyer_id, buyer_username, nft_url, description, price, currency, status, created_at = trade
-    
-    if user_id == seller_id:
-        bot.send_message(message.chat.id, "❌ Нельзя присоединиться к своей сделке")
-        conn.close()
-        return
-    
-    if buyer_id is not None:
-        bot.send_message(message.chat.id, "❌ В этой сделке уже есть покупатель")
-        conn.close()
-        return
-    
-    # Обновляем сделку с покупателем
-    cursor.execute('UPDATE trades SET buyer_id = ?, buyer_username = ?, status = ? WHERE id = ?',
-                  (user_id, username, 'waiting_payment', trade_id))
-    
-    conn.commit()
-    conn.close()
-    
-    # Уведомление покупателю
-    bot.send_message(user_id,
-                    f"✅ *Вы присоединились к сделке!*\n\n"
-                    f"👤 Продавец: {seller_username}\n"
-                    f"🎁 NFT: {nft_url}\n"
-                    f"📝 Описание: {description}\n"
-                    f"💰 Цена: {price} {CURRENCIES[currency]}\n\n"
-                    f"💡 *Для завершения сделки необходимо:*\n"
-                    f"1. Привязать карту или указать username для оплаты звездами\n"
-                    f"2. Перевести средства\n"
-                    f"3. Подтвердить оплату",
-                    parse_mode='Markdown')
-    
-    # Уведомление продавцу
-    bot.send_message(seller_id,
-                    f"🎉 *Покупатель присоединился к вашей сделке!*\n\n"
-                    f"👤 Покупатель: {username}\n"
-                    f"💰 Сумма: {price} {CURRENCIES[currency]}\n\n"
-                    f"⏳ *Ожидайте перевода от покупателя...*\n"
-                    f"Как только покупатель подтвердит оплату, вы получите уведомление.",
-                    parse_mode='Markdown')
-    
-    # Показываем кнопку оплаты покупателю
-    markup = types.InlineKeyboardMarkup()
-    markup.row(types.InlineKeyboardButton('💳 Перейти к оплате', callback_data=f'payment_{trade_id}'))
-    
-    bot.send_message(user_id, "Нажмите кнопку ниже для перевода средств:", reply_markup=markup)
-
-# Обработка оплаты
-@bot.callback_query_handler(func=lambda call: call.data.startswith('payment_'))
-def handle_payment(call):
-    trade_id = int(call.data.split('_')[1])
-    user_id = call.from_user.id
-    
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM trades WHERE id = ?', (trade_id,))
-    trade = cursor.fetchone()
-    cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
-    user = cursor.fetchone()
-    
-    if not trade or not user:
-        bot.answer_callback_query(call.id, "❌ Ошибка")
-        conn.close()
-        return
-    
-    trade_id, trade_unique_id, seller_id, seller_username, buyer_id, buyer_username, nft_url, description, price, currency, status, created_at = trade
-    user_id_db, username, rub, usd, byn, kzt, uah, stars, card, is_admin = user
-    
-    if user_id != buyer_id:
-        bot.answer_callback_query(call.id, "❌ Вы не участник этой сделки")
-        conn.close()
-        return
-    
-    conn.close()
-    
-    # Проверяем баланс (кроме админа)
-    if not is_admin:
-        if currency == 'stars' and stars < price:
-            bot.send_message(user_id, f"❌ Недостаточно звезд. На вашем балансе: {stars}⭐")
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM trades WHERE trade_unique_id = ?', (trade_unique_id,))
+        trade = cursor.fetchone()
+        
+        if not trade:
+            bot.send_message(message.chat.id, "❌ Сделка не найдена")
+            conn.close()
             return
-        elif currency == 'rub' and rub < price:
-            bot.send_message(user_id, f"❌ Недостаточно рублей. На вашем балансе: {rub}₽")
-            return
-        elif currency == 'usd' and usd < price:
-            bot.send_message(user_id, f"❌ Недостаточно долларов. На вашем балансе: {usd}$")
-            return
-        elif currency == 'byn' and byn < price:
-            bot.send_message(user_id, f"❌ Недостаточно BYN. На вашем балансе: {byn} BYN")
-            return
-        elif currency == 'kzt' and kzt < price:
-            bot.send_message(user_id, f"❌ Недостаточно тенге. На вашем балансе: {kzt}₸")
-            return
-        elif currency == 'uah' and uah < price:
-            bot.send_message(user_id, f"❌ Недостаточно гривен. На вашем балансе: {uah}₴")
-            return
-    
-    # Показываем методы оплаты
-    payment_text = (
-        f"💳 *Оплата сделки*\n\n"
-        f"💰 Сумма: {price} {CURRENCIES[currency]}\n"
-        f"👤 Продавец: {seller_username}\n\n"
-    )
-    
-    markup = types.InlineKeyboardMarkup()
-    
-    if currency == 'stars':
-        payment_text += "⭐ *Оплата звездами:*\nУбедитесь что у вас достаточно звезд на балансе"
-        markup.row(types.InlineKeyboardButton('⭐ Я оплатил(а) звездами', callback_data=f'confirm_stars_{trade_id}'))
-    else:
-        payment_text += f"💳 *Оплата {CURRENCIES[currency]}:*\nУбедитесь что у вас привязана карта и достаточно средств"
-        markup.row(types.InlineKeyboardButton('💳 Я оплатил(а) картой', callback_data=f'confirm_card_{trade_id}'))
-    
-    if not is_admin:
-        if currency != 'stars' and not card:
-            payment_text += "\n\n❌ *У вас не привязана карта!*"
-            markup.row(types.InlineKeyboardButton('💳 Привязать карту', callback_data='bind_card'))
-    
-    bot.edit_message_text(payment_text, call.message.chat.id, call.message.message_id, 
-                         reply_markup=markup, parse_mode='Markdown')
-
-# Подтверждение оплаты
-@bot.callback_query_handler(func=lambda call: call.data.startswith(('confirm_stars_', 'confirm_card_')))
-def handle_payment_confirmation(call):
-    trade_id = int(call.data.split('_')[2])
-    payment_method = call.data.split('_')[1]
-    user_id = call.from_user.id
-    
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM trades WHERE id = ?', (trade_id,))
-    trade = cursor.fetchone()
-    cursor.execute('SELECT * FROM users WHERE user_id = ?', (user_id,))
-    user = cursor.fetchone()
-    
-    if not trade or not user:
-        bot.answer_callback_query(call.id, "❌ Ошибка")
-        conn.close()
-        return
-    
-    trade_id, trade_unique_id, seller_id, seller_username, buyer_id, buyer_username, nft_url, description, price, currency, status, created_at = trade
-    user_id_db, username, rub, usd, byn, kzt, uah, stars, card, is_admin = user
-    
-    if user_id != buyer_id:
-        bot.answer_callback_query(call.id, "❌ Вы не участник этой сделки")
-        conn.close()
-        return
-    
-    # Для НЕ-админов списываем средства
-    if not is_admin:
-        if currency == 'stars':
-            if stars < price:
-                bot.answer_callback_query(call.id, "❌ Недостаточно звезд")
-                conn.close()
-                return
-            cursor.execute('UPDATE users SET stars = stars - ? WHERE user_id = ?', (price, user_id))
-        elif currency == 'rub':
-            if rub < price:
-                bot.answer_callback_query(call.id, "❌ Недостаточно рублей")
-                conn.close()
-                return
-            cursor.execute('UPDATE users SET balance_rub = balance_rub - ? WHERE user_id = ?', (price, user_id))
-        elif currency == 'usd':
-            if usd < price:
-                bot.answer_callback_query(call.id, "❌ Недостаточно долларов")
-                conn.close()
-                return
-            cursor.execute('UPDATE users SET balance_usd = balance_usd - ? WHERE user_id = ?', (price, user_id))
-        elif currency == 'byn':
-            if byn < price:
-                bot.answer_callback_query(call.id, "❌ Недостаточно BYN")
-                conn.close()
-                return
-            cursor.execute('UPDATE users SET balance_byn = balance_byn - ? WHERE user_id = ?', (price, user_id))
-        elif currency == 'kzt':
-            if kzt < price:
-                bot.answer_callback_query(call.id, "❌ Недостаточно тенге")
-                conn.close()
-                return
-            cursor.execute('UPDATE users SET balance_kzt = balance_kzt - ? WHERE user_id = ?', (price, user_id))
-        elif currency == 'uah':
-            if uah < price:
-                bot.answer_callback_query(call.id, "❌ Недостаточно гривен")
-                conn.close()
-                return
-            cursor.execute('UPDATE users SET balance_uah = balance_uah - ? WHERE user_id = ?', (price, user_id))
-    
-    # Обновляем статус сделки
-    cursor.execute('UPDATE trades SET status = ? WHERE id = ?', ('waiting_delivery', trade_id))
-    
-    # Записываем транзакцию
-    cursor.execute('INSERT INTO transactions (trade_id, user_id, amount, currency, status) VALUES (?, ?, ?, ?, ?)',
-                  (trade_id, user_id, price, currency, 'completed' if is_admin else 'pending'))
-    
-    conn.commit()
-    conn.close()
-    
-    # Уведомление покупателю
-    bot.edit_message_text(
-        "✅ *Оплата подтверждена!*\n\n"
-        "💰 Средства зарезервированы\n"
-        "⏳ Ожидайте передачи NFT от продавца\n\n"
-        "💡 Продавец получил уведомление и скоро передаст вам подарок",
-        call.message.chat.id, call.message.message_id, parse_mode='Markdown'
-    )
-    
-    # Уведомление продавцу
-    markup = types.InlineKeyboardMarkup()
-    markup.row(types.InlineKeyboardButton('🎁 Я передал(а) NFT', callback_data=f'delivered_{trade_id}'))
-    
-    bot.send_message(seller_id,
-                    f"🎉 *Покупатель подтвердил оплату!*\n\n"
-                    f"👤 Покупатель: {buyer_username}\n"
-                    f"💰 Сумма: {price} {CURRENCIES[currency]}\n"
-                    f"🎁 NFT: {nft_url}\n\n"
-                    f"📦 *Теперь вам нужно:*\n"
-                    f"1. Передать NFT подарок на аккаунт покупателя\n"
-                    f"2. Сделать скриншот подтверждения\n"
-                    f"3. Нажать кнопку 'Я передал(а) NFT'\n\n"
-                    f"💡 *Внимание!* Без подтверждения передачи NFT средства не поступят на ваш счет!",
-                    reply_markup=markup, parse_mode='Markdown')
-
-# Подтверждение передачи NFT
-@bot.callback_query_handler(func=lambda call: call.data.startswith('delivered_'))
-def handle_delivery_confirmation(call):
-    trade_id = int(call.data.split('_')[1])
-    user_id = call.from_user.id
-    
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM trades WHERE id = ?', (trade_id,))
-    trade = cursor.fetchone()
-    
-    if not trade or user_id != trade[2]:  # seller_id
-        bot.answer_callback_query(call.id, "❌ Ошибка")
-        conn.close()
-        return
-    
-    trade_id, trade_unique_id, seller_id, seller_username, buyer_id, buyer_username, nft_url, description, price, currency, status, created_at = trade
-    
-    # Запрашиваем скриншот
-    msg = bot.send_message(user_id, 
-                          "📸 *Прикрепите скриншот подтверждения передачи NFT:*\n\n"
-                          "На скриншоте должно быть видно:\n"
-                          "• Передачу подарка\n"
-                          "• Аккаунт получателя\n"
-                          "• Дату и время\n\n"
-                          "💡 Это необходимо для защиты обеих сторон сделки",
-                          parse_mode='Markdown')
-    
-    user_data[user_id] = {'step': 'waiting_screenshot', 'trade_id': trade_id}
-    conn.close()
-
-# Обработка скриншота
-@bot.message_handler(content_types=['photo'])
-def handle_screenshot(message):
-    user_id = message.from_user.id
-    
-    if user_id not in user_data or user_data[user_id].get('step') != 'waiting_screenshot':
-        return
-    
-    trade_id = user_data[user_id]['trade_id']
-    
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM trades WHERE id = ?', (trade_id,))
-    trade = cursor.fetchone()
-    
-    if trade:
+        
         trade_id, trade_unique_id, seller_id, seller_username, buyer_id, buyer_username, nft_url, description, price, currency, status, created_at = trade
         
-        # Завершаем сделку
-        cursor.execute('UPDATE trades SET status = ? WHERE id = ?', ('completed', trade_id))
+        if user_id == seller_id:
+            bot.send_message(message.chat.id, "❌ Нельзя присоединиться к своей сделке")
+            conn.close()
+            return
         
-        # Зачисляем средства продавцу (если не админ)
-        cursor.execute('SELECT is_admin FROM users WHERE user_id = ?', (buyer_id,))
-        buyer_is_admin = cursor.fetchone()[0]
+        if buyer_id is not None:
+            bot.send_message(message.chat.id, "❌ В этой сделке уже есть покупатель")
+            conn.close()
+            return
         
-        if not buyer_is_admin:
-            if currency == 'stars':
-                cursor.execute('UPDATE users SET stars = stars + ? WHERE user_id = ?', (price, seller_id))
-            elif currency == 'rub':
-                cursor.execute('UPDATE users SET balance_rub = balance_rub + ? WHERE user_id = ?', (price, seller_id))
-            elif currency == 'usd':
-                cursor.execute('UPDATE users SET balance_usd = balance_usd + ? WHERE user_id = ?', (price, seller_id))
-            elif currency == 'byn':
-                cursor.execute('UPDATE users SET balance_byn = balance_byn + ? WHERE user_id = ?', (price, seller_id))
-            elif currency == 'kzt':
-                cursor.execute('UPDATE users SET balance_kzt = balance_kzt + ? WHERE user_id = ?', (price, seller_id))
-            elif currency == 'uah':
-                cursor.execute('UPDATE users SET balance_uah = balance_uah + ? WHERE user_id = ?', (price, seller_id))
+        # Обновляем сделку с покупателем
+        cursor.execute('UPDATE trades SET buyer_id = ?, buyer_username = ?, status = ? WHERE id = ?',
+                      (user_id, username, 'waiting_payment', trade_id))
         
         conn.commit()
         conn.close()
         
+        # Уведомление покупателю
+        bot.send_message(user_id,
+                        f"✅ *Вы присоединились к сделке!*\n\n"
+                        f"👤 Продавец: {seller_username}\n"
+                        f"🎁 NFT: {nft_url}\n"
+                        f"📝 Описание: {description}\n"
+                        f"💰 Цена: {price} {CURRENCIES[currency]}\n\n"
+                        f"💡 *Для завершения сделки необходимо:*\n"
+                        f"1. Привязать карту или указать username для оплаты звездами\n"
+                        f"2. Перевести средства\n"
+                        f"3. Подтвердить оплату",
+                        parse_mode='Markdown')
+        
         # Уведомление продавцу
         bot.send_message(seller_id,
-                        "✅ *Сделка завершена!*\n\n"
-                        f"💰 Средства зачислены на ваш баланс\n"
-                        f"🎁 NFT успешно передан\n"
-                        f"👤 Покупатель: {buyer_username}\n\n"
-                        "Спасибо за сделку! 🎉",
+                        f"🎉 *Покупатель присоединился к вашей сделке!*\n\n"
+                        f"👤 Покупатель: {username}\n"
+                        f"💰 Сумма: {price} {CURRENCIES[currency]}\n\n"
+                        f"⏳ *Ожидайте перевода от покупателя...*\n"
+                        f"Как только покупатель подтвердит оплату, вы получите уведомление.",
                         parse_mode='Markdown')
         
-        # Уведомление покупателю
-        bot.send_message(buyer_id,
-                        "✅ *Сделка завершена!*\n\n"
-                        f"🎁 Вы получили NFT подарок\n"
-                        f"👤 Продавец: {seller_username}\n"
-                        f"📎 NFT: {nft_url}\n\n"
-                        "Спасибо за покупку! 🎉",
-                        parse_mode='Markdown')
+        # Показываем кнопку оплаты покупателю
+        markup = types.InlineKeyboardMarkup()
+        markup.row(types.InlineKeyboardButton('💳 Перейти к оплате', callback_data=f'payment_{trade_id}'))
         
-        del user_data[user_id]
+        bot.send_message(user_id, "Нажмите кнопку ниже для перевода средств:", reply_markup=markup)
+        
+    except Exception as e:
+        bot.send_message(message.chat.id, "❌ Ошибка присоединения к сделке")
+        print(f"❌ Ошибка присоединения: {e}")
 
-# Мои сделки
+# Мои сделки - УЛУЧШЕННАЯ ВЕРСИЯ
 @bot.message_handler(func=lambda message: message.text == '💼 Мои сделки')
 def my_trades(message):
     user_id = message.from_user.id
-    conn = sqlite3.connect('trades.db')
-    cursor = conn.cursor()
-    
-    # Сделки где пользователь продавец
-    cursor.execute('SELECT * FROM trades WHERE seller_id = ? ORDER BY created_at DESC', (user_id,))
-    seller_trades = cursor.fetchall()
-    
-    # Сделки где пользователь покупатель
-    cursor.execute('SELECT * FROM trades WHERE buyer_id = ? ORDER BY created_at DESC', (user_id,))
-    buyer_trades = cursor.fetchall()
-    
-    conn.close()
-    
-    if not seller_trades and not buyer_trades:
-        bot.send_message(message.chat.id, "📭 У вас пока нет сделок")
-        return
-    
-    if seller_trades:
-        bot.send_message(message.chat.id, "🏪 *Сделки где вы продавец:*", parse_mode='Markdown')
-        for trade in seller_trades:
-            show_trade_info(message.chat.id, trade, 'seller')
-    
-    if buyer_trades:
-        bot.send_message(message.chat.id, "🛒 *Сделки где вы покупатель:*", parse_mode='Markdown')
-        for trade in buyer_trades:
-            show_trade_info(message.chat.id, trade, 'buyer')
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        # Сделки где пользователь продавец
+        cursor.execute('SELECT * FROM trades WHERE seller_id = ? ORDER BY created_at DESC', (user_id,))
+        seller_trades = cursor.fetchall()
+        
+        # Сделки где пользователь покупатель
+        cursor.execute('SELECT * FROM trades WHERE buyer_id = ? ORDER BY created_at DESC', (user_id,))
+        buyer_trades = cursor.fetchall()
+        
+        conn.close()
+        
+        if not seller_trades and not buyer_trades:
+            bot.send_message(message.chat.id, "📭 У вас пока нет сделок")
+            return
+        
+        if seller_trades:
+            bot.send_message(message.chat.id, "🏪 *Сделки где вы продавец:*", parse_mode='Markdown')
+            for trade in seller_trades:
+                show_trade_info(message.chat.id, trade, 'seller')
+        
+        if buyer_trades:
+            bot.send_message(message.chat.id, "🛒 *Сделки где вы покупатель:*", parse_mode='Markdown')
+            for trade in buyer_trades:
+                show_trade_info(message.chat.id, trade, 'buyer')
+                
+    except Exception as e:
+        bot.send_message(message.chat.id, "❌ Ошибка загрузки сделок")
+        print(f"❌ Ошибка моих сделок: {e}")
 
 def show_trade_info(chat_id, trade, role):
-    trade_id, trade_unique_id, seller_id, seller_username, buyer_id, buyer_username, nft_url, description, price, currency, status, created_at = trade
-    
-    status_emoji = {
-        'waiting_payment': '⏳',
-        'waiting_delivery': '📦', 
-        'completed': '✅',
-        'cancelled': '❌'
-    }
-    
-    text = (
-        f"🎁 *Сделка #{trade_id}*\n"
-        f"💰 {price} {CURRENCIES[currency]}\n"
-        f"📊 Статус: {status_emoji.get(status, '⚡')} {status}\n"
-        f"🕐 {created_at[:16]}"
-    )
-    
-    if role == 'seller' and buyer_username:
-        text += f"\n👤 Покупатель: {buyer_username}"
-    elif role == 'buyer':
-        text += f"\n👤 Продавец: {seller_username}"
-    
-    bot.send_message(chat_id, text, parse_mode='Markdown')
+    try:
+        trade_id, trade_unique_id, seller_id, seller_username, buyer_id, buyer_username, nft_url, description, price, currency, status, created_at = trade
+        
+        status_emoji = {
+            'waiting_payment': '⏳',
+            'waiting_delivery': '📦', 
+            'completed': '✅',
+            'cancelled': '❌'
+        }
+        
+        text = (
+            f"🎁 *Сделка #{trade_id}*\n"
+            f"💰 {price} {CURRENCIES[currency]}\n"
+            f"📊 Статус: {status_emoji.get(status, '⚡')} {status}\n"
+            f"🕐 {created_at[:16]}"
+        )
+        
+        if role == 'seller' and buyer_username:
+            text += f"\n👤 Покупатель: {buyer_username}"
+        elif role == 'buyer':
+            text += f"\n👤 Продавец: {seller_username}"
+        
+        bot.send_message(chat_id, text, parse_mode='Markdown')
+    except Exception as e:
+        print(f"❌ Ошибка показа сделки: {e}")
 
 # Админ панель
 @bot.message_handler(func=lambda message: message.text == '🛠️ Админ панель' and message.from_user.id == ADMIN_ID)
@@ -735,10 +499,6 @@ def admin_panel(message):
     markup.row(
         types.InlineKeyboardButton('📊 Статистика', callback_data='admin_stats'),
         types.InlineKeyboardButton('👥 Пользователи', callback_data='admin_users')
-    )
-    markup.row(
-        types.InlineKeyboardButton('💼 Все сделки', callback_data='admin_trades'),
-        types.InlineKeyboardButton('💰 Балансы', callback_data='admin_balances')
     )
     
     bot.send_message(message.chat.id, 
@@ -754,6 +514,11 @@ def send_test(message):
 
 # Запуск бота
 if __name__ == "__main__":
-    print("🤖 Бот запущен с полной системой сделок!")
-    bot.infinity_polling()
+    print("🤖 Инициализация бота...")
+    # Инициализируем БД при запуске
+    if init_db():
+        print("✅ Бот запущен с полной системой сделок!")
+        bot.infinity_polling()
+    else:
+        print("❌ Не удалось запустить бота из-за ошибки БД")
 
