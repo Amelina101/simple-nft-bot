@@ -80,7 +80,7 @@ def add_nft(message):
 def send_test(message):
     bot.reply_to(message, "✅ Тестовая команда работает!")
 
-if __name__ == "__main__":
+if __name__== "__main__":
     print("🚀 Бот запущен с админ панелью!")
     print("✅ Админ ID:", ADMIN_ID)
     bot.infinity_polling()
