@@ -339,6 +339,7 @@ def join_trade(message, trade_unique_id):
     
     bot.send_message(creator_id, f"Подтверждаете участника {username}?", reply_markup=markup)
 
+
 # Подтверждение участника создателем сделки
 @bot.callback_query_handler(func=lambda call: call.data.startswith(('confirm_participant_', 'reject_participant_')))
 def handle_participant_confirmation(call):
