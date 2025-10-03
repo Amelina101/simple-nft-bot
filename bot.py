@@ -21,7 +21,7 @@ def send_admin(message):
     else:
         bot.reply_to(message, "❌ Нет доступа к админ панели")
 
-if __name__ == "__main__":/
+if __name__ == "__main__":
     print("🚀 Запуск бота на pyTelegramBotAPI...")
     print("✅ Бот запущен и слушает сообщения...")
     bot.infinity_polling()
