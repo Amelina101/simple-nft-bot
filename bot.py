@@ -242,11 +242,17 @@ def save_trade_to_db(user_id, trade_data):
     conn = sqlite3.connect('trades.db')
     cursor = conn.cursor()
     
+    # Получаем username пользователя
+    try:
+        user_chat = bot.get_chat(user_id)
+        username = f"@{user_chat.username}" if user_chat.username else "Без username"
+    except:
+        username = "Без username"
+    
     cursor.execute('''
         INSERT INTO trades (trade_unique_id, user_id, user_username, nft_url, description, price, currency)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (trade_data['trade_unique_id'], user_id, 
-          f"@{bot.get_chat(user_id).username}" if bot.get_chat(user_id).username else "Без username",
+    ''', (trade_data['trade_unique_id'], user_id, username,
           trade_data['nft_url'], trade_data['description'], 
           trade_data['price'], trade_data['currency']))
     
