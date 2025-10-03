@@ -1,14 +1,14 @@
 import os
 from telegram import Update
-from telegram.ext import Application, CommandHandler
+from telegram.ext import Updater, CommandHandler, CallbackContext
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 
-async def start(update: Update, context):
-    await update.message.reply_text("🎉 Бот работает! Привет!")
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text("🎉 Бот работает! Привет!")
 
-async def test(update: Update, context):
-    await update.message.reply_text("✅ Тестовая команда работает!")
+def test(update: Update, context: CallbackContext):
+    update.message.reply_text("✅ Тестовая команда работает!")
 
 def main():
     print("🚀 Запуск простого бота...")
@@ -17,13 +17,20 @@ def main():
         print("❌ ОШИБКА: BOT_TOKEN не найден")
         return
     
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Используем Updater для версии 13.15
+    updater = Updater(BOT_TOKEN, use_context=True)
     
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("test", test))
+    # Получаем диспетчер
+    dp = updater.dispatcher
     
+    # Регистрируем команды
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("test", test))
+    
+    # Запускаем бота
     print("✅ Бот запущен и готов к работе!")
-    app.run_polling()
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
