@@ -407,11 +407,12 @@ def handle_participant_confirmation(call):
 # Мои сделки (созданные)
 @bot.message_handler(func=lambda message: message.text == '💼 Мои сделки')
 def my_trades(message):
+    user_id = message.from_user.id
     conn = sqlite3.connect('trades.db')
     cursor = conn.cursor()
     
     # Сделки созданные пользователем
-    cursor.execute('SELECT * FROM trades WHERE user_id = ? ORDER BY created_at DESC', (message.from_user.id,))
+    cursor.execute('SELECT * FROM trades WHERE user_id = ? ORDER BY created_at DESC', (user_id,))
     created_trades = cursor.fetchall()
     
     # Сделки где пользователь участник
@@ -419,7 +420,7 @@ def my_trades(message):
         SELECT t.* FROM trades t
         JOIN trade_participants tp ON t.id = tp.trade_id
         WHERE tp.user_id = ? ORDER BY tp.joined_at DESC
-    ''', (message.from_user.id,))
+    ''', (user_id,))
     joined_trades = cursor.fetchall()
     
     conn.close()
@@ -433,7 +434,7 @@ def my_trades(message):
         bot.send_message(message.chat.id, "🏪 *Созданные вами сделки:*", parse_mode='Markdown')
         
         for trade in created_trades:
-            trade_id, trade_unique_id, user_id, username, nft_url, description, price, currency, status, created_at = trade
+            trade_id, trade_unique_id, creator_id, creator_username, nft_url, description, price, currency, status, created_at = trade
             
             # Получаем количество участников
             conn = sqlite3.connect('trades.db')
@@ -468,8 +469,9 @@ def my_trades(message):
             conn = sqlite3.connect('trades.db')
             cursor = conn.cursor()
             cursor.execute('SELECT status FROM trade_participants WHERE trade_id = ? AND user_id = ?', 
-                          (trade_id, message.from_user.id))
-            participant_status = cursor.fetchone()[0]
+                          (trade_id, user_id))
+            participant_status_result = cursor.fetchone()
+            participant_status = participant_status_result[0] if participant_status_result else "unknown"
             conn.close()
             
             trade_text = (
@@ -479,10 +481,11 @@ def my_trades(message):
                 f"💰 Цена: {price} {currency}\n"
                 f"👤 Создатель: {creator_username}\n"
                 f"✅ Ваш статус: {participant_status}\n"
-                f"🕐 Присоединились: {created_at[:16]}"
+                f"🕐 Создана: {created_at[:16]}"
             )
             
             bot.send_message(message.chat.id, trade_text, parse_mode='Markdown')
+
 
 # Админ панель
 @bot.message_handler(func=lambda message: message.text == '🛠️ Админ панель' and message.from_user.id == ADMIN_ID)
