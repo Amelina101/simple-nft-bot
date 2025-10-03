@@ -1,36 +1,27 @@
 import os
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, CallbackContext
+import telebot
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text("🎉 Бот работает! Привет!")
+# Создаем бота
+bot = telebot.TeleBot(BOT_TOKEN)
 
-def test(update: Update, context: CallbackContext):
-    update.message.reply_text("✅ Тестовая команда работает!")
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "🎉 Бот работает! Привет!")
 
-def main():
-    print("🚀 Запуск простого бота...")
-    
-    if not BOT_TOKEN:
-        print("❌ ОШИБКА: BOT_TOKEN не найден")
-        return
-    
-    # Используем Updater для версии 13.15
-    updater = Updater(BOT_TOKEN, use_context=True)
-    
-    # Получаем диспетчер
-    dp = updater.dispatcher
-    
-    # Регистрируем команды
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("test", test))
-    
-    # Запускаем бота
-    print("✅ Бот запущен и готов к работе!")
-    updater.start_polling()
-    updater.idle()
+@bot.message_handler(commands=['test'])
+def send_test(message):
+    bot.reply_to(message, "✅ Тестовая команда работает!")
+
+@bot.message_handler(commands=['admin'])
+def send_admin(message):
+    if message.from_user.id == 6540509823:  # ЗАМЕНИТЕ НА ВАШ ID
+        bot.reply_to(message, "🛠️ Панель администратора открыта!")
+    else:
+        bot.reply_to(message, "❌ Нет доступа к админ панели")
 
 if __name__ == "__main__":
-    main()
+    print("🚀 Запуск бота на pyTelegramBotAPI...")
+    print("✅ Бот запущен и слушает сообщения...")
+    bot.infinity_polling()
