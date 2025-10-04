@@ -5,6 +5,10 @@ from telebot import types
 import time
 import random
 import string
+from flask import Flask, request
+
+# Инициализация Flask приложения для Render
+app = Flask(__name__)
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = 6540509823  # ВАШ РЕАЛЬНЫЙ ID
@@ -276,7 +280,7 @@ def handle_trade_cancellation(call):
                            f"💰 {price} {CURRENCIES[currency]}\n\n"
                            f"💡 Покупатель отменил сделку.")
         
-        # Уведомление инициатору отмены
+        # Уведомление инициатору отмене
         bot.edit_message_text(
             f"✅ Сделка успешно отменена\n\n"
             f"🎁 Сделка #{trade_id}\n"
@@ -507,6 +511,65 @@ def save_trade_to_db(user_id, trade_data):
     except Exception as e:
         print(f"❌ Ошибка сохранения сделки: {e}")
 
+# НОВАЯ ФУНКЦИЯ: Проверка и списание звезд
+def process_stars_payment(trade_id, buyer_id):
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        # Получаем информацию о сделке и покупателе
+        cursor.execute('SELECT * FROM trades WHERE id = ?', (trade_id,))
+        trade = cursor.fetchone()
+        cursor.execute('SELECT * FROM users WHERE user_id = ?', (buyer_id,))
+        user = cursor.fetchone()
+        
+        if not trade or not user:
+            conn.close()
+            return False, "❌ Ошибка данных"
+        
+        (trade_id, trade_unique_id, seller_id, seller_username, 
+         buyer_id_db, buyer_username, nft_url, description, price, 
+         currency, status, created_at) = trade
+        
+        user_id_db, username, rub, usd, byn, kzt, uah, stars, card, is_admin = user
+        
+        # Проверяем что покупатель совпадает
+        if buyer_id != buyer_id_db:
+            conn.close()
+            return False, "❌ Несоответствие пользователя"
+        
+        # Если пользователь не админ - проверяем и списываем звезды
+        if not is_admin:
+            if stars < price:
+                conn.close()
+                return False, f"❌ Недостаточно звезд. На вашем балансе: {stars}⭐"
+            
+            # Списание звезд у покупателя
+            new_stars = stars - price
+            cursor.execute('UPDATE users SET stars = ? WHERE user_id = ?', (new_stars, buyer_id))
+            
+            # Начисление звезд продавцу (если продавец не админ)
+            cursor.execute('SELECT is_admin FROM users WHERE user_id = ?', (seller_id,))
+            seller_is_admin = cursor.fetchone()[0]
+            
+            if not seller_is_admin:
+                cursor.execute('SELECT stars FROM users WHERE user_id = ?', (seller_id,))
+                seller_stars = cursor.fetchone()[0]
+                new_seller_stars = seller_stars + price
+                cursor.execute('UPDATE users SET stars = ? WHERE user_id = ?', (new_seller_stars, seller_id))
+        
+        # Обновляем статус сделки
+        cursor.execute('UPDATE trades SET status = ? WHERE id = ?', ('waiting_delivery', trade_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return True, "✅ Оплата прошла успешно!"
+        
+    except Exception as e:
+        print(f"❌ Ошибка обработки оплаты: {e}")
+        return False, "❌ Ошибка обработки оплаты"
+
 # Начало оплаты
 @bot.callback_query_handler(func=lambda call: call.data.startswith('start_payment_'))
 def handle_payment_start(call):
@@ -571,7 +634,11 @@ def handle_payment_start(call):
         markup = types.InlineKeyboardMarkup()
         
         if currency == 'stars':
-            payment_text += "⭐ Оплата звездами:\nУбедитесь что у вас достаточно звезд на балансе"
+            if is_admin:
+                payment_text += "👑 АДМИН ОПЛАТА:\nУ вас безлимитные звезды!"
+            else:
+                payment_text += f"⭐ Оплата звездами:\nНа вашем балансе: {stars}⭐\nБудет списано: {price}⭐"
+            
             markup.row(types.InlineKeyboardButton('⭐ Я оплатил(а) звездами', callback_data=f'confirm_payment_{trade_id}'))
         else:
             payment_text += f"💳 Оплата {CURRENCIES[currency]}:\nУбедитесь что у вас привязана карта и достаточно средств"
@@ -584,6 +651,140 @@ def handle_payment_start(call):
         
     except Exception as e:
         bot.answer_callback_query(call.id, "❌ Ошибка оплаты")
+
+# НОВЫЙ ОБРАБОТЧИК: Подтверждение оплаты звездами
+@bot.callback_query_handler(func=lambda call: call.data.startswith('confirm_payment_'))
+def handle_payment_confirmation(call):
+    trade_id = int(call.data.split('_')[2])
+    user_id = call.from_user.id
+    
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM trades WHERE id = ?', (trade_id,))
+        trade = cursor.fetchone()
+        
+        if not trade:
+            bot.answer_callback_query(call.id, "❌ Сделка не найдена")
+            conn.close()
+            return
+        
+        (trade_id, trade_unique_id, seller_id, seller_username, 
+         buyer_id, buyer_username, nft_url, description, price, 
+         currency, status, created_at) = trade
+        
+        if user_id != buyer_id:
+            bot.answer_callback_query(call.id, "❌ Вы не участник этой сделки")
+            conn.close()
+            return
+        
+        conn.close()
+        
+        # Обрабатываем оплату
+        if currency == 'stars':
+            success, message = process_stars_payment(trade_id, user_id)
+            
+            if success:
+                # Уведомление покупателю
+                buyer_message = (
+                    "✅ Оплата прошла успешно!\n\n"
+                    f"💰 Сумма: {price} {CURRENCIES[currency]}\n"
+                    f"👤 Продавец: {seller_username}\n\n"
+                    "⏳ Ожидайте получения NFT подарка от продавца"
+                )
+                
+                bot.edit_message_text(buyer_message, call.message.chat.id, call.message.message_id)
+                
+                # УВЕДОМЛЕНИЕ ПРОДАВЦУ О ПОЛУЧЕНИИ ОПЛАТЫ
+                seller_message = (
+                    "💰 Получена оплата за сделку!\n\n"
+                    f"👤 Покупатель: {buyer_username}\n"
+                    f"🎁 NFT: {nft_url}\n"
+                    f"📝 Описание: {description}\n"
+                    f"💰 Сумма: {price} {CURRENCIES[currency]}\n\n"
+                    "💡 Пожалуйста, переведите NFT подарок покупателю и подтвердите доставку"
+                )
+                
+                markup_seller = types.InlineKeyboardMarkup()
+                markup_seller.row(
+                    types.InlineKeyboardButton('✅ Я перевел(а) подарок', callback_data=f'confirm_delivery_{trade_id}')
+                )
+                
+                bot.send_message(seller_id, seller_message, reply_markup=markup_seller)
+                
+            else:
+                bot.answer_callback_query(call.id, message)
+                bot.send_message(user_id, message)
+        
+        else:
+            # Для других валют (пока заглушка)
+            bot.answer_callback_query(call.id, "⏳ Оплата другими валютами в разработке")
+            
+    except Exception as e:
+        bot.answer_callback_query(call.id, "❌ Ошибка подтверждения оплаты")
+        print(f"❌ Ошибка подтверждения оплаты: {e}")
+
+# НОВЫЙ ОБРАБОТЧИК: Подтверждение доставки подарка продавцом
+@bot.callback_query_handler(func=lambda call: call.data.startswith('confirm_delivery_'))
+def handle_delivery_confirmation(call):
+    trade_id = int(call.data.split('_')[2])
+    user_id = call.from_user.id
+    
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM trades WHERE id = ?', (trade_id,))
+        trade = cursor.fetchone()
+        
+        if not trade:
+            bot.answer_callback_query(call.id, "❌ Сделка не найдена")
+            conn.close()
+            return
+        
+        (trade_id, trade_unique_id, seller_id, seller_username, 
+         buyer_id, buyer_username, nft_url, description, price, 
+         currency, status, created_at) = trade
+        
+        if user_id != seller_id:
+            bot.answer_callback_query(call.id, "❌ Только продавец может подтвердить доставку")
+            conn.close()
+            return
+        
+        # Обновляем статус сделки на завершенный
+        cursor.execute('UPDATE trades SET status = ? WHERE id = ?', ('completed', trade_id))
+        conn.commit()
+        conn.close()
+        
+        # Уведомление продавцу
+        seller_message = (
+            "✅ Сделка завершена!\n\n"
+            f"🎁 Сделка #{trade_id} успешно завершена\n"
+            f"💰 Вы получили: {price} {CURRENCIES[currency]}\n"
+            f"👤 Покупатель: {buyer_username}\n\n"
+            "💖 Спасибо за использование нашего сервиса!"
+        )
+        
+        bot.edit_message_text(seller_message, call.message.chat.id, call.message.message_id)
+        
+        # Уведомление покупателю
+        buyer_message = (
+            "🎉 Сделка завершена!\n\n"
+            f"🎁 Сделка #{trade_id} успешно завершена\n"
+            f"👤 Продавец: {seller_username}\n"
+            f"📎 NFT: {nft_url}\n\n"
+            "💖 Наслаждайтесь вашим NFT подарком!\n"
+            "⭐ Спасибо за использование нашего сервиса!"
+        )
+        
+        bot.send_message(buyer_id, buyer_message)
+        
+        print(f"✅ Сделка {trade_id} завершена")
+        
+    except Exception as e:
+        bot.answer_callback_query(call.id, "❌ Ошибка подтверждения доставки")
+        print(f"❌ Ошибка подтверждения доставки: {e}")
 
 # Мои сделки - ОБНОВЛЕННАЯ ВЕРСИЯ С КНОПКАМИ ОТМЕНЫ
 @bot.message_handler(func=lambda message: message.text == '💼 Мои сделки')
@@ -629,6 +830,7 @@ def show_trade_info(chat_id, trade, role, user_id):
         status_emoji = {
             'waiting_buyer': '⏳',
             'waiting_payment': '💳',
+            'waiting_delivery': '📦',
             'completed': '✅',
             'cancelled': '❌'
         }
@@ -647,8 +849,10 @@ def show_trade_info(chat_id, trade, role, user_id):
         
         markup = types.InlineKeyboardMarkup()
         
-        # Добавляем кнопку отмены для активных сделок
-        if status in ['waiting_buyer', 'waiting_payment']:
+        # Добавляем кнопки в зависимости от статуса и роли
+        if status == 'waiting_delivery' and role == 'seller':
+            markup.row(types.InlineKeyboardButton('✅ Я перевел(а) подарок', callback_data=f'confirm_delivery_{trade_id}'))
+        elif status in ['waiting_buyer', 'waiting_payment']:
             if role == 'seller':
                 markup.row(types.InlineKeyboardButton('❌ Отменить сделку', callback_data=f'cancel_trade_seller_{trade_id}'))
             elif role == 'buyer':
@@ -683,27 +887,49 @@ def admin_panel(message):
 def send_test(message):
     bot.reply_to(message, "✅ Бот работает!")
 
-# Запуск бота
+# Webhook обработчики для Render
+@app.route('/')
+def index():
+    return "🤖 NFT Trade Bot is running!"
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ''
+    return 'OK'
+
+# Запуск приложения
 if __name__ == "__main__":
     print("🤖 Запуск NFT Trade Bot...")
     print(f"👑 Админ ID: {ADMIN_ID}")
     
     # Инициализируем БД
     if init_db():
-        print("✅ Бот запущен!")
+        print("✅ База данных готова!")
         
-        # Останавливаем предыдущие соединения
+        # На Render используем webhook
         try:
             bot.remove_webhook()
             time.sleep(1)
-        except:
-            pass
-        
-        try:
-            bot.infinity_polling()
+            
+            # Установка webhook для Render
+            webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/webhook"
+            bot.set_webhook(url=webhook_url)
+            print(f"✅ Webhook установлен: {webhook_url}")
+            
+            # Запускаем Flask приложение
+            port = int(os.environ.get('PORT', 5000))
+            app.run(host='0.0.0.0', port=port)
+            
         except Exception as e:
-            print(f"❌ Ошибка: {e}")
+            print(f"❌ Ошибка webhook: {e}")
+            # Fallback на polling для локального тестирования
+            print("🔄 Запуск в режиме polling...")
+            bot.infinity_polling()
     else:
-        print("❌ Не удалось запустить бота")
+        print("❌ Не удалось инициализировать базу данных")
 
 
