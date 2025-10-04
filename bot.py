@@ -7,7 +7,7 @@ import random
 import string
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = 6540509823  # ВАШ РЕАЛЬНЫЙ ID
+ADMIN_ID = 6540509823 # ВАШ РЕАЛЬНЫЙ ID
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -82,7 +82,7 @@ CURRENCIES = {
     'uah': '🇺🇦 UAH (Гривны)'
 }
 
-# Главное меню
+# Главное меню - ИСПРАВЛЕННАЯ ВЕРСИЯ
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     if not init_db():
@@ -102,13 +102,16 @@ def send_welcome(message):
     except:
         pass
     
-    # Проверяем ссылку присоединения
+    # ПРОВЕРЯЕМ ССЫЛКУ ПРИСОЕДИНЕНИЯ - ИСПРАВЛЕННЫЙ КОД
     if len(message.text.split()) > 1:
-        command = message.text.split()[1]
-        if command.startswith('join_'):
-            trade_unique_id = command[5:]  # Убираем 'join_'
-            process_join_trade(message, trade_unique_id)
-            return
+        command_parts = message.text.split()
+        if len(command_parts) >= 2:
+            param = command_parts[1]
+            if param.startswith('join_'):
+                trade_unique_id = param.replace('join_', '')
+                print(f"🔗 Попытка присоединения к сделке: {trade_unique_id}")
+                process_join_trade(message, trade_unique_id)
+                return
     
     # Показываем главное меню
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -125,10 +128,12 @@ def send_welcome(message):
                     "Добро пожаловать в NFT Trade Bot!",
                     reply_markup=markup)
 
-# Процесс присоединения к сделке
+# Процесс присоединения к сделке - ИСПРАВЛЕННАЯ ВЕРСИЯ
 def process_join_trade(message, trade_unique_id):
     user_id = message.from_user.id
     username = f"@{message.from_user.username}" if message.from_user.username else "Без username"
+    
+    print(f"🔄 Обработка присоединения: пользователь {user_id} к сделке {trade_unique_id}")
     
     try:
         conn = sqlite3.connect('trades.db', check_same_thread=False)
@@ -139,6 +144,7 @@ def process_join_trade(message, trade_unique_id):
         trade = cursor.fetchone()
         
         if not trade:
+            print(f"❌ Сделка {trade_unique_id} не найдена")
             bot.send_message(message.chat.id, "❌ Сделка не найдена или устарела")
             conn.close()
             return
@@ -148,8 +154,11 @@ def process_join_trade(message, trade_unique_id):
          buyer_id, buyer_username, nft_url, description, price, 
          currency, status, created_at) = trade
         
+        print(f"📊 Найдена сделка: ID {trade_id}, продавец {seller_id}, покупатель {buyer_id}")
+        
         # Проверяем не является ли пользователь продавцом
         if user_id == seller_id:
+            print(f"❌ Пользователь {user_id} пытается присоединиться к своей сделке")
             bot.send_message(message.chat.id, 
                            "❌ Вы не можете присоединиться к своей собственной сделке!\n\n"
                            "💡 Отправьте эту ссылку другому человеку для покупки.")
@@ -158,6 +167,7 @@ def process_join_trade(message, trade_unique_id):
         
         # Проверяем нет ли уже покупателя
         if buyer_id is not None:
+            print(f"❌ В сделке {trade_id} уже есть покупатель {buyer_id}")
             bot.send_message(message.chat.id, "❌ В этой сделке уже есть покупатель")
             conn.close()
             return
@@ -172,37 +182,36 @@ def process_join_trade(message, trade_unique_id):
         conn.commit()
         conn.close()
         
+        print(f"✅ Пользователь {user_id} успешно присоединился к сделке {trade_id}")
+        
         # УВЕДОМЛЕНИЕ ДЛЯ ПОКУПАТЕЛЯ
         buyer_message = (
-            f"✅ *Вы присоединились к сделке!*\n\n"
-            f"👤 **Продавец:** {seller_username}\n"
-            f"🎁 **NFT:** {nft_url}\n"
-            f"📝 **Описание:** {description}\n"
-            f"💰 **Цена:** {price} {CURRENCIES[currency]}\n\n"
-            f"💡 *Для завершения сделки необходимо:*\n"
-            f"1. Перейти к оплате\n"
-            f"2. Подтвердить перевод средств\n"
+            "✅ Вы присоединились к сделке!\n\n"
+            f"👤 Продавец: {seller_username}\n"
+            f"🎁 NFT: {nft_url}\n"
+            f"📝 Описание: {description}\n"
+            f"💰 Цена: {price} {CURRENCIES[currency]}\n\n"
+            "💡 Для завершения сделки необходимо перейти к оплате"
         )
         
         markup = types.InlineKeyboardMarkup()
         markup.row(types.InlineKeyboardButton('💳 Перейти к оплате', callback_data=f'start_payment_{trade_id}'))
         
-        bot.send_message(user_id, buyer_message, reply_markup=markup, parse_mode='Markdown')
+        bot.send_message(user_id, buyer_message, reply_markup=markup)
         
         # УВЕДОМЛЕНИЕ ДЛЯ ПРОДАВЦА
         seller_message = (
-            f"🎉 *Покупатель присоединился к вашей сделке!*\n\n"
-            f"👤 **Покупатель:** {username}\n"
-            f"💰 **Сумма:** {price} {CURRENCIES[currency]}\n\n"
-            f"⏳ *Ожидайте оплаты от покупателя...*\n"
-            f"Вы получите уведомление, когда покупатель подтвердит перевод."
+            "🎉 Покупатель присоединился к вашей сделке!\n\n"
+            f"👤 Покупатель: {username}\n"
+            f"💰 Сумма: {price} {CURRENCIES[currency]}\n\n"
+            "⏳ Ожидайте оплаты от покупателя..."
         )
         
-        bot.send_message(seller_id, seller_message, parse_mode='Markdown')
+        bot.send_message(seller_id, seller_message)
         
     except Exception as e:
-        bot.send_message(message.chat.id, "❌ Ошибка присоединения к сделке")
         print(f"❌ Ошибка присоединения: {e}")
+        bot.send_message(message.chat.id, "❌ Ошибка присоединения к сделке")
 
 # Баланс пользователя
 @bot.message_handler(func=lambda message: message.text == '💳 Баланс')
@@ -219,20 +228,20 @@ def show_balance(message):
             user_id, username, rub, usd, byn, kzt, uah, stars, card, is_admin = user
             
             balance_text = (
-                f"💰 *Ваш баланс:*\n\n"
-                f"⭐ Звезды: `{stars}`\n"
-                f"🇷🇺 RUB: `{rub}`\n"
-                f"🇺🇸 USD: `{usd}`\n"
-                f"🇧🇾 BYN: `{byn}`\n"
-                f"🇰🇿 KZT: `{kzt}`\n"
-                f"🇺🇦 UAH: `{uah}`\n\n"
+                f"💰 Ваш баланс:\n\n"
+                f"⭐ Звезды: {stars}\n"
+                f"🇷🇺 RUB: {rub}\n"
+                f"🇺🇸 USD: {usd}\n"
+                f"🇧🇾 BYN: {byn}\n"
+                f"🇰🇿 KZT: {kzt}\n"
+                f"🇺🇦 UAH: {uah}\n\n"
             )
             
             if card:
-                balance_text += f"💳 Привязанная карта: `{card}`\n\n"
+                balance_text += f"💳 Привязанная карта: {card}\n\n"
             
             if is_admin:
-                balance_text += "👑 *Статус: АДМИНИСТРАТОР*\n💎 Баланс: Безлимитный"
+                balance_text += "👑 Статус: АДМИНИСТРАТОР\n💎 Баланс: Безлимитный"
             else:
                 balance_text += "💡 Для пополнения баланса используйте команду /deposit"
             
@@ -242,7 +251,7 @@ def show_balance(message):
                 types.InlineKeyboardButton('⭐ Пополнить звезды', callback_data='add_stars')
             )
             
-            bot.send_message(message.chat.id, balance_text, reply_markup=markup, parse_mode='Markdown')
+            bot.send_message(message.chat.id, balance_text, reply_markup=markup)
     except Exception as e:
         bot.send_message(message.chat.id, "❌ Ошибка загрузки баланса")
 
@@ -267,9 +276,9 @@ def start_create_trade(message):
     )
     
     bot.send_message(message.chat.id,
-                    "🎁 *Создание новой сделки*\n\n"
+                    "🎁 Создание новой сделки\n\n"
                     "💵 Выберите валюту для оплаты:",
-                    reply_markup=markup, parse_mode='Markdown')
+                    reply_markup=markup)
 
 # Обработка выбора валюты
 @bot.callback_query_handler(func=lambda call: call.data.startswith('currency_'))
@@ -284,8 +293,7 @@ def handle_currency_selection(call):
     
     msg = bot.send_message(call.message.chat.id,
                          f"✅ Валюта: {CURRENCIES[currency_code]}\n\n"
-                         "📎 Отправьте ссылку на NFT подарок:",
-                         parse_mode='Markdown')
+                         "📎 Отправьте ссылку на NFT подарок:")
     
     bot.register_next_step_handler(msg, process_nft_url)
 
@@ -341,7 +349,7 @@ def show_trade_preview(chat_id, user_id):
     trade_data = user_data[user_id]
     
     preview_text = (
-        "🎁 *Превью сделки:*\n\n"
+        "🎁 Превью сделки:\n\n"
         f"📎 NFT: {trade_data['nft_url']}\n"
         f"📝 Описание: {trade_data['description']}\n"
         f"💰 Цена: {trade_data['price']} {trade_data['currency_display']}\n\n"
@@ -354,7 +362,7 @@ def show_trade_preview(chat_id, user_id):
         types.InlineKeyboardButton('❌ Отменить', callback_data='cancel_trade')
     )
     
-    bot.send_message(chat_id, preview_text, reply_markup=markup, parse_mode='Markdown')
+    bot.send_message(chat_id, preview_text, reply_markup=markup)
 
 # Подтверждение сделки
 @bot.callback_query_handler(func=lambda call: call.data in ['confirm_trade', 'cancel_trade'])
@@ -372,16 +380,16 @@ def handle_trade_confirmation(call):
         join_link = f"https://t.me/{bot.get_me().username}?start=join_{trade_unique_id}"
         
         success_text = (
-            "✅ *Сделка успешно создана!*\n\n"
-            f"🎁 **Ссылка для присоединения:**\n"
-            f"`{join_link}`\n\n"
-            f"📎 **NFT:** {user_data[user_id]['nft_url']}\n"
-            f"💰 **Цена:** {user_data[user_id]['price']} {user_data[user_id]['currency_display']}\n\n"
-            f"💡 *Отправьте эту ссылку покупателю*\n"
-            f"❌ *Вы не можете присоединиться к своей сделке*"
+            "✅ Сделка успешно создана!\n\n"
+            f"🎁 Ссылка для присоединения:\n"
+            f"{join_link}\n\n"
+            f"📎 NFT: {user_data[user_id]['nft_url']}\n"
+            f"💰 Цена: {user_data[user_id]['price']} {user_data[user_id]['currency_display']}\n\n"
+            f"💡 Отправьте эту ссылку покупателю\n"
+            f"❌ Вы не можете присоединиться к своей сделке"
         )
         
-        bot.edit_message_text(success_text, call.message.chat.id, call.message.message_id, parse_mode='Markdown')
+        bot.edit_message_text(success_text, call.message.chat.id, call.message.message_id)
         
         # Очищаем временные данные
         if user_id in user_data:
@@ -469,7 +477,7 @@ def handle_payment_start(call):
         
         # Показываем методы оплаты
         payment_text = (
-            f"💳 *Оплата сделки*\n\n"
+            f"💳 Оплата сделки\n\n"
             f"💰 Сумма: {price} {CURRENCIES[currency]}\n"
             f"👤 Продавец: {seller_username}\n\n"
         )
@@ -477,14 +485,14 @@ def handle_payment_start(call):
         markup = types.InlineKeyboardMarkup()
         
         if currency == 'stars':
-            payment_text += "⭐ *Оплата звездами:*\nУбедитесь что у вас достаточно звезд на балансе"
+            payment_text += "⭐ Оплата звездами:\nУбедитесь что у вас достаточно звезд на балансе"
             markup.row(types.InlineKeyboardButton('⭐ Я оплатил(а) звездами', callback_data=f'confirm_payment_{trade_id}'))
         else:
-            payment_text += f"💳 *Оплата {CURRENCIES[currency]}:*\nУбедитесь что у вас привязана карта и достаточно средств"
+            payment_text += f"💳 Оплата {CURRENCIES[currency]}:\nУбедитесь что у вас привязана карта и достаточно средств"
             markup.row(types.InlineKeyboardButton('💳 Я оплатил(а) картой', callback_data=f'confirm_payment_{trade_id}'))
         
         bot.edit_message_text(payment_text, call.message.chat.id, call.message.message_id, 
-                             reply_markup=markup, parse_mode='Markdown')
+                             reply_markup=markup)
         
     except Exception as e:
         bot.answer_callback_query(call.id, "❌ Ошибка оплаты")
@@ -512,12 +520,12 @@ def my_trades(message):
             return
         
         if seller_trades:
-            bot.send_message(message.chat.id, "🏪 *Сделки где вы продавец:*", parse_mode='Markdown')
+            bot.send_message(message.chat.id, "🏪 Сделки где вы продавец:")
             for trade in seller_trades:
                 show_trade_info(message.chat.id, trade, 'seller')
         
         if buyer_trades:
-            bot.send_message(message.chat.id, "🛒 *Сделки где вы покупатель:*", parse_mode='Markdown')
+            bot.send_message(message.chat.id, "🛒 Сделки где вы покупатель:")
             for trade in buyer_trades:
                 show_trade_info(message.chat.id, trade, 'buyer')
                 
@@ -538,7 +546,7 @@ def show_trade_info(chat_id, trade, role):
         }
         
         text = (
-            f"🎁 *Сделка #{trade_id}*\n"
+            f"🎁 Сделка #{trade_id}\n"
             f"💰 {price} {CURRENCIES[currency]}\n"
             f"📊 Статус: {status_emoji.get(status, '⚡')} {status}\n"
             f"🕐 {created_at[:16]}"
@@ -552,9 +560,9 @@ def show_trade_info(chat_id, trade, role):
         # Если это продавец и сделка ожидает покупателя, показываем ссылку
         if role == 'seller' and status == 'waiting_buyer':
             join_link = f"https://t.me/{bot.get_me().username}?start=join_{trade_unique_id}"
-            text += f"\n🔗 Ссылка: `{join_link}`"
+            text += f"\n🔗 Ссылка: {join_link}"
         
-        bot.send_message(chat_id, text, parse_mode='Markdown')
+        bot.send_message(chat_id, text)
     except Exception as e:
         print(f"❌ Ошибка показа сделки: {e}")
 
@@ -568,11 +576,11 @@ def admin_panel(message):
     )
     
     bot.send_message(message.chat.id, 
-                    "🛠️ *Панель администратора*\n\n"
+                    "🛠️ Панель администратора\n\n"
                     "👑 Статус: АДМИНИСТРАТОР\n"
                     "💎 Баланс: Безлимитный\n"
                     "⚡ Привилегии: Все операции",
-                    reply_markup=markup, parse_mode='Markdown')
+                    reply_markup=markup)
 
 @bot.message_handler(commands=['test'])
 def send_test(message):
@@ -600,3 +608,5 @@ if __name__ == "__main__":
             print(f"❌ Ошибка: {e}")
     else:
         print("❌ Не удалось запустить бота")
+
+
