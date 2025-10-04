@@ -692,13 +692,20 @@ def handle_payment_confirmation(call):
                 
                 bot.edit_message_text(buyer_message, call.message.chat.id, call.message.message_id)
                 
-                # УВЕДОМЛЕНИЕ ПРОДАВЦУ О ПОЛУЧЕНИИ ОПЛАТЫ
-                seller_message = (
+                # УВЕДОМЛЕНИЕ ПРОДАВЦУ О ПОЛУЧЕНИИ ОПЛАТЫ С ПРЕДУПРЕЖДЕНИЕМ
+                seller_warning_message = (
+                    "⚠️ ⚠️ ⚠️ ВАЖНОЕ ПРЕДУПРЕЖДЕНИЕ ⚠️ ⚠️ ⚠️\n\n"
                     "💰 Получена оплата за сделку!\n\n"
                     f"👤 Покупатель: {buyer_username}\n"
                     f"🎁 NFT: {nft_url}\n"
                     f"📝 Описание: {description}\n"
                     f"💰 Сумма: {price} {CURRENCIES[currency]}\n\n"
+                    "🔴 🔴 🔴 ВНИМАНИЕ 🔴 🔴 🔴\n"
+                    "• Средства покупателя ЗАБЛОКИРОВАНЫ на escrow-счете\n"
+                    "• Вы получите оплату ТОЛЬКО после подтверждения доставки\n"
+                    "• Если вы не переведете NFT подарок, сделка НЕ завершится\n"
+                    "• Средства НЕ будут переведены на ваш счет\n"
+                    "• Покупатель сможет отозвать оплату через 24 часа\n\n"
                     "💡 Пожалуйста, переведите NFT подарок покупателю и подтвердите доставку"
                 )
                 
@@ -706,8 +713,11 @@ def handle_payment_confirmation(call):
                 markup_seller.row(
                     types.InlineKeyboardButton('✅ Я перевел(а) подарок', callback_data=f'confirm_delivery_{trade_id}')
                 )
+                markup_seller.row(
+                    types.InlineKeyboardButton('❌ У меня проблемы с переводом', callback_data=f'delivery_problems_{trade_id}')
+                )
                 
-                bot.send_message(seller_id, seller_message, reply_markup=markup_seller)
+                bot.send_message(seller_id, seller_warning_message, reply_markup=markup_seller)
                 
             else:
                 bot.answer_callback_query(call.id, message)
@@ -755,23 +765,28 @@ def handle_delivery_confirmation(call):
         
         # Уведомление продавцу
         seller_message = (
-            "✅ Сделка завершена!\n\n"
-            f"🎁 Сделка #{trade_id} успешно завершена\n"
+            "🎉 🎉 🎉 СДЕЛКА УСПЕШНО ЗАВЕРШЕНА! 🎉 🎉 🎉\n\n"
+            f"🎁 Сделка #{trade_id} завершена\n"
             f"💰 Вы получили: {price} {CURRENCIES[currency]}\n"
             f"👤 Покупатель: {buyer_username}\n\n"
-            "💖 Спасибо за использование нашего сервиса!"
+            "✅ Средства переведены на ваш счет\n"
+            "✅ NFT подарок доставлен покупателю\n"
+            "✅ Сделка завершена успешно!\n\n"
+            "💖 Спасибо за честную торговлю!"
         )
         
         bot.edit_message_text(seller_message, call.message.chat.id, call.message.message_id)
         
         # Уведомление покупателю
         buyer_message = (
-            "🎉 Сделка завершена!\n\n"
-            f"🎁 Сделка #{trade_id} успешно завершена\n"
+            "🎉 🎉 🎉 СДЕЛКА УСПЕШНО ЗАВЕРШЕНА! 🎉 🎉 🎉\n\n"
+            f"🎁 Сделка #{trade_id} завершена\n"
             f"👤 Продавец: {seller_username}\n"
             f"📎 NFT: {nft_url}\n\n"
-            "💖 Наслаждайтесь вашим NFT подарком!\n"
-            "⭐ Спасибо за использование нашего сервиса!"
+            "✅ Вы получили NFT подарок\n"
+            "✅ Оплата завершена\n"
+            "✅ Сделка завершена успешно!\n\n"
+            "💖 Наслаждайтесь вашим NFT подарком!"
         )
         
         bot.send_message(buyer_id, buyer_message)
@@ -782,7 +797,65 @@ def handle_delivery_confirmation(call):
         bot.answer_callback_query(call.id, "❌ Ошибка подтверждения доставки")
         print(f"❌ Ошибка подтверждения доставки: {e}")
 
-# Мои сделки - ОБНОВЛЕННАЯ ВЕРСИЯ С КНОПКАМИ ОТМЕНЫ
+# НОВЫЙ ОБРАБОТЧИК: Проблемы с доставкой
+@bot.callback_query_handler(func=lambda call: call.data.startswith('delivery_problems_'))
+def handle_delivery_problems(call):
+    trade_id = int(call.data.split('_')[2])
+    user_id = call.from_user.id
+    
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM trades WHERE id = ?', (trade_id,))
+        trade = cursor.fetchone()
+        
+        if not trade:
+            bot.answer_callback_query(call.id, "❌ Сделка не найдена")
+            conn.close()
+            return
+        
+        (trade_id, trade_unique_id, seller_id, seller_username, 
+         buyer_id, buyer_username, nft_url, description, price, 
+         currency, status, created_at) = trade
+        
+        if user_id != seller_id:
+            bot.answer_callback_query(call.id, "❌ Только продавец может сообщить о проблемах")
+            conn.close()
+            return
+        
+        conn.close()
+        
+        # Сообщение с инструкциями при проблемах
+        problem_message = (
+            "🆘 ПРОБЛЕМЫ С ДОСТАВКОЙ\n\n"
+            f"Сделка #{trade_id}\n"
+            f"Покупатель: {buyer_username}\n\n"
+            "Если у вас возникли проблемы с переводом NFT:\n\n"
+            "1. 🔄 Проверьте правильность ссылки на NFT\n"
+            "2. 🔄 Убедитесь, что NFT доступен для передачи\n"
+            "3. 🔄 Свяжитесь с покупателем для уточнения деталей\n"
+            "4. 🔄 Если проблема не решается - отмените сделку\n\n"
+            "⚠️ Помните: пока вы не подтвердите доставку:\n"
+            "• Средства НЕ будут переведены вам\n"
+            "• Покупатель может отменить сделку\n"
+            "• Сделка останется в статусе ожидания\n\n"
+            "Выберите действие:"
+        )
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton('🔄 Попробовать снова', callback_data=f'start_payment_{trade_id}'),
+            types.InlineKeyboardButton('❌ Отменить сделку', callback_data=f'cancel_trade_seller_{trade_id}')
+        )
+        
+        bot.edit_message_text(problem_message, call.message.chat.id, call.message.message_id, reply_markup=markup)
+        
+    except Exception as e:
+        bot.answer_callback_query(call.id, "❌ Ошибка")
+        print(f"❌ Ошибка обработки проблем: {e}")
+
+# Мои сделки - ОБНОВЛЕННАЯ ВЕРСИЯ С ПРЕДУПРЕЖДЕНИЯМИ
 @bot.message_handler(func=lambda message: message.text == '💼 Мои сделки')
 def my_trades(message):
     user_id = message.from_user.id
@@ -805,6 +878,19 @@ def my_trades(message):
             return
         
         if seller_trades:
+            # Предупреждение для продавцов о незавершенных сделках
+            pending_seller_trades = [t for t in seller_trades if t[10] == 'waiting_delivery']
+            if pending_seller_trades:
+                warning_text = (
+                    "⚠️ ⚠️ ⚠️ ВНИМАНИЕ ПРОДАВЦАМ ⚠️ ⚠️ ⚠️\n\n"
+                    f"У вас {len(pending_seller_trades)} невыполненных сделок!\n"
+                    "• Средства покупателей ЗАБЛОКИРОВАНЫ\n"
+                    "• Вы получите оплату ТОЛЬКО после доставки NFT\n"
+                    "• Не забудьте перевести подарки и подтвердить доставку\n\n"
+                    "Ниже список ваших сделок:"
+                )
+                bot.send_message(message.chat.id, warning_text)
+            
             bot.send_message(message.chat.id, "🏪 Сделки где вы продавец:")
             for trade in seller_trades:
                 show_trade_info(message.chat.id, trade, 'seller', user_id)
@@ -838,6 +924,13 @@ def show_trade_info(chat_id, trade, role, user_id):
             f"🕐 {created_at[:16]}"
         )
         
+        # ДОБАВЛЯЕМ ПРЕДУПРЕЖДЕНИЯ ДЛЯ ПРОДАВЦОВ
+        if role == 'seller' and status == 'waiting_delivery':
+            text += "\n\n🔴 🔴 🔴 СРОЧНОЕ ПРЕДУПРЕЖДЕНИЕ 🔴 🔴 🔴\n"
+            text += "• Средства покупателя ЗАБЛОКИРОВАНЫ\n"
+            text += "• Вы получите оплату ТОЛЬКО после доставки\n"
+            text += "• Переведите NFT и подтвердите доставку!"
+        
         if role == 'seller' and buyer_username:
             text += f"\n👤 Покупатель: {buyer_username}"
         elif role == 'buyer':
@@ -848,6 +941,7 @@ def show_trade_info(chat_id, trade, role, user_id):
         # Добавляем кнопки в зависимости от статуса и роли
         if status == 'waiting_delivery' and role == 'seller':
             markup.row(types.InlineKeyboardButton('✅ Я перевел(а) подарок', callback_data=f'confirm_delivery_{trade_id}'))
+            markup.row(types.InlineKeyboardButton('🆘 Проблемы с доставкой', callback_data=f'delivery_problems_{trade_id}'))
         elif status in ['waiting_buyer', 'waiting_payment']:
             if role == 'seller':
                 markup.row(types.InlineKeyboardButton('❌ Отменить сделку', callback_data=f'cancel_trade_seller_{trade_id}'))
@@ -905,5 +999,3 @@ if __name__ == "__main__":
             print(f"❌ Ошибка: {e}")
     else:
         print("❌ Не удалось запустить бота")
-
-
