@@ -5,10 +5,6 @@ from telebot import types
 import time
 import random
 import string
-from flask import Flask, request
-
-# Инициализация Flask приложения для Render
-app = Flask(__name__)
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = 6540509823  # ВАШ РЕАЛЬНЫЙ ID
@@ -280,7 +276,7 @@ def handle_trade_cancellation(call):
                            f"💰 {price} {CURRENCIES[currency]}\n\n"
                            f"💡 Покупатель отменил сделку.")
         
-        # Уведомление инициатору отмене
+        # Уведомление инициатору отмены
         bot.edit_message_text(
             f"✅ Сделка успешно отменена\n\n"
             f"🎁 Сделка #{trade_id}\n"
@@ -887,49 +883,27 @@ def admin_panel(message):
 def send_test(message):
     bot.reply_to(message, "✅ Бот работает!")
 
-# Webhook обработчики для Render
-@app.route('/')
-def index():
-    return "🤖 NFT Trade Bot is running!"
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return ''
-    return 'OK'
-
-# Запуск приложения
+# Запуск бота
 if __name__ == "__main__":
     print("🤖 Запуск NFT Trade Bot...")
     print(f"👑 Админ ID: {ADMIN_ID}")
     
     # Инициализируем БД
     if init_db():
-        print("✅ База данных готова!")
+        print("✅ Бот запущен!")
         
-        # На Render используем webhook
+        # Останавливаем предыдущие соединения
         try:
             bot.remove_webhook()
             time.sleep(1)
-            
-            # Установка webhook для Render
-            webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/webhook"
-            bot.set_webhook(url=webhook_url)
-            print(f"✅ Webhook установлен: {webhook_url}")
-            
-            # Запускаем Flask приложение
-            port = int(os.environ.get('PORT', 5000))
-            app.run(host='0.0.0.0', port=port)
-            
-        except Exception as e:
-            print(f"❌ Ошибка webhook: {e}")
-            # Fallback на polling для локального тестирования
-            print("🔄 Запуск в режиме polling...")
+        except:
+            pass
+        
+        try:
             bot.infinity_polling()
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
     else:
-        print("❌ Не удалось инициализировать базу данных")
+        print("❌ Не удалось запустить бота")
 
 
