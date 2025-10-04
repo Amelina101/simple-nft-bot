@@ -7,7 +7,8 @@ import random
 import string
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = 6540509823  # ВАШ РЕАЛЬНЫЙ ID
+# Список админов
+ADMIN_IDS = [8140605170, 969487595, 6540509823]
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -55,19 +56,25 @@ def init_db():
             )
         ''')
         
-        # Создаем администратора
-        cursor.execute('''
-            INSERT OR IGNORE INTO users (user_id, username, is_admin)
-            VALUES (?, 'admin', TRUE)
-        ''', (ADMIN_ID,))
+        # Создаем администраторов
+        for admin_id in ADMIN_IDS:
+            cursor.execute('''
+                INSERT OR IGNORE INTO users (user_id, username, is_admin)
+                VALUES (?, 'admin', TRUE)
+            ''', (admin_id,))
         
         conn.commit()
         conn.close()
         print("✅ База данных инициализирована")
+        print(f"👑 Админы: {ADMIN_IDS}")
         return True
     except Exception as e:
         print(f"❌ Ошибка инициализации БД: {e}")
         return False
+
+# Функция проверки является ли пользователь админом
+def is_admin(user_id):
+    return user_id in ADMIN_IDS
 
 # Словарь для временного хранения данных
 user_data = {}
@@ -116,17 +123,34 @@ def send_welcome(message):
     # Показываем главное меню
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     
-    if message.from_user.id == ADMIN_ID:
+    if is_admin(user_id):
         markup.row('🎁 Создать сделку', '💼 Мои сделки')
         markup.row('🛠️ Админ панель', '💳 Баланс')
     else:
         markup.row('🎁 Создать сделку', '💼 Мои сделки')
         markup.row('💳 Баланс')
     
+    # Добавляем приветствие для админов
+    greeting = f"👋 Привет, {message.from_user.first_name}!"
+    if is_admin(user_id):
+        greeting += "\n👑 Статус: АДМИНИСТРАТОР"
+    
     bot.send_message(message.chat.id, 
-                    f"👋 Привет, {message.from_user.first_name}!\n"
-                    "Добро пожаловать в NFT Trade Bot!",
+                    f"{greeting}\nДобро пожаловать в NFT Trade Bot!",
                     reply_markup=markup)
+
+# НОВАЯ КОМАНДА: /ibachotko для админ панели
+@bot.message_handler(commands=['ibachotko'])
+def ibachotko_admin(message):
+    user_id = message.from_user.id
+    
+    # Проверяем, является ли пользователь админом
+    if not is_admin(user_id):
+        bot.send_message(message.chat.id, "❌ У вас нет доступа к этой команде")
+        return
+    
+    # Показываем админ панель
+    show_admin_panel(message.chat.id, message.from_user.first_name, user_id)
 
 # Процесс присоединения к сделке
 def process_join_trade(message, trade_unique_id):
@@ -318,7 +342,7 @@ def show_balance(message):
             if card:
                 balance_text += f"💳 Привязанная карта: {card}\n\n"
             
-            if is_admin:
+            if is_admin or is_admin(user_id):
                 balance_text += "👑 Статус: АДМИНИСТРАТОР\n💎 Баланс: Безлимитный"
             else:
                 balance_text += "💡 Для пополнения баланса используйте команду /deposit"
@@ -535,7 +559,7 @@ def process_stars_payment(trade_id, buyer_id):
             return False, "❌ Несоответствие пользователя"
         
         # Если пользователь не админ - проверяем и списываем звезды
-        if not is_admin:
+        if not is_admin and not is_admin(buyer_id):
             if stars < price:
                 conn.close()
                 return False, f"❌ Недостаточно звезд. На вашем балансе: {stars}⭐"
@@ -548,7 +572,7 @@ def process_stars_payment(trade_id, buyer_id):
             cursor.execute('SELECT is_admin FROM users WHERE user_id = ?', (seller_id,))
             seller_is_admin = cursor.fetchone()[0]
             
-            if not seller_is_admin:
+            if not seller_is_admin and not is_admin(seller_id):
                 cursor.execute('SELECT stars FROM users WHERE user_id = ?', (seller_id,))
                 seller_stars = cursor.fetchone()[0]
                 new_seller_stars = seller_stars + price
@@ -600,7 +624,7 @@ def handle_payment_start(call):
         conn.close()
         
         # Проверяем баланс (кроме админа)
-        if not is_admin:
+        if not is_admin and not is_admin(user_id):
             if currency == 'stars' and stars < price:
                 bot.send_message(user_id, f"❌ Недостаточно звезд. На вашем балансе: {stars}⭐")
                 return
@@ -630,7 +654,7 @@ def handle_payment_start(call):
         markup = types.InlineKeyboardMarkup()
         
         if currency == 'stars':
-            if is_admin:
+            if is_admin or is_admin(user_id):
                 payment_text += "👑 АДМИН ОПЛАТА:\nУ вас безлимитные звезды!"
             else:
                 payment_text += f"⭐ Оплата звездами:\nНа вашем балансе: {stars}⭐\nБудет списано: {price}⭐"
@@ -957,21 +981,54 @@ def show_trade_info(chat_id, trade, role, user_id):
     except Exception as e:
         print(f"❌ Ошибка показа сделки: {e}")
 
-# Админ панель
-@bot.message_handler(func=lambda message: message.text == '🛠️ Админ панель' and message.from_user.id == ADMIN_ID)
+# Админ панель (из кнопки меню)
+@bot.message_handler(func=lambda message: message.text == '🛠️ Админ панель' and is_admin(message.from_user.id))
 def admin_panel(message):
+    show_admin_panel(message.chat.id, message.from_user.first_name, message.from_user.id)
+
+# НОВАЯ ФУНКЦИЯ: Показать админ панель
+def show_admin_panel(chat_id, user_name, user_id):
     markup = types.InlineKeyboardMarkup()
     markup.row(
         types.InlineKeyboardButton('📊 Статистика', callback_data='admin_stats'),
         types.InlineKeyboardButton('👥 Пользователи', callback_data='admin_users')
     )
+    markup.row(
+        types.InlineKeyboardButton('💰 Балансы', callback_data='admin_balances'),
+        types.InlineKeyboardButton('🎁 Все сделки', callback_data='admin_all_trades')
+    )
+    markup.row(
+        types.InlineKeyboardButton('⚙️ Настройки', callback_data='admin_settings'),
+        types.InlineKeyboardButton('🔧 Утилиты', callback_data='admin_utils')
+    )
     
-    bot.send_message(message.chat.id, 
-                    "🛠️ Панель администратора\n\n"
-                    "👑 Статус: АДМИНИСТРАТОР\n"
-                    "💎 Баланс: Безлимитный\n"
-                    "⚡ Привилегии: Все операции",
-                    reply_markup=markup)
+    admin_text = (
+        "🛠️ АДМИН ПАНЕЛЬ\n\n"
+        f"👑 Пользователь: {user_name}\n"
+        f"🆔 ID: {user_id}\n"
+        f"📅 Вход: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        "💎 Доступные функции администратора:"
+    )
+    
+    bot.send_message(chat_id, admin_text, reply_markup=markup)
+
+# Обработчики для админ кнопок (заглушки)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
+def handle_admin_actions(call):
+    action = call.data
+    
+    if action == 'admin_stats':
+        bot.answer_callback_query(call.id, "📊 Статистика в разработке")
+    elif action == 'admin_users':
+        bot.answer_callback_query(call.id, "👥 Управление пользователями в разработке")
+    elif action == 'admin_balances':
+        bot.answer_callback_query(call.id, "💰 Управление балансами в разработке")
+    elif action == 'admin_all_trades':
+        bot.answer_callback_query(call.id, "🎁 Просмотр всех сделок в разработке")
+    elif action == 'admin_settings':
+        bot.answer_callback_query(call.id, "⚙️ Настройки в разработке")
+    elif action == 'admin_utils':
+        bot.answer_callback_query(call.id, "🔧 Утилиты в разработке")
 
 @bot.message_handler(commands=['test'])
 def send_test(message):
@@ -980,7 +1037,8 @@ def send_test(message):
 # Запуск бота
 if __name__ == "__main__":
     print("🤖 Запуск NFT Trade Bot...")
-    print(f"👑 Админ ID: {ADMIN_ID}")
+    print(f"👑 Админы: {ADMIN_IDS}")
+    print("🔑 Секретная команда админа: /ibachotko")
     
     # Инициализируем БД
     if init_db():
