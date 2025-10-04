@@ -7,7 +7,7 @@ import random
 import string
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = 6540509823 # ВАШ РЕАЛЬНЫЙ ID
+ADMIN_ID = 6540509823  # ВАШ РЕАЛЬНЫЙ ID
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -82,7 +82,7 @@ CURRENCIES = {
     'uah': '🇺🇦 UAH (Гривны)'
 }
 
-# Главное меню - ИСПРАВЛЕННАЯ ВЕРСИЯ
+# Главное меню
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     if not init_db():
@@ -102,7 +102,7 @@ def send_welcome(message):
     except:
         pass
     
-    # ПРОВЕРЯЕМ ССЫЛКУ ПРИСОЕДИНЕНИЯ - ИСПРАВЛЕННЫЙ КОД
+    # ПРОВЕРЯЕМ ССЫЛКУ ПРИСОЕДИНЕНИЯ
     if len(message.text.split()) > 1:
         command_parts = message.text.split()
         if len(command_parts) >= 2:
@@ -128,7 +128,7 @@ def send_welcome(message):
                     "Добро пожаловать в NFT Trade Bot!",
                     reply_markup=markup)
 
-# Процесс присоединения к сделке - ИСПРАВЛЕННАЯ ВЕРСИЯ
+# Процесс присоединения к сделке
 def process_join_trade(message, trade_unique_id):
     user_id = message.from_user.id
     username = f"@{message.from_user.username}" if message.from_user.username else "Без username"
@@ -196,6 +196,7 @@ def process_join_trade(message, trade_unique_id):
         
         markup = types.InlineKeyboardMarkup()
         markup.row(types.InlineKeyboardButton('💳 Перейти к оплате', callback_data=f'start_payment_{trade_id}'))
+        markup.row(types.InlineKeyboardButton('❌ Отменить сделку', callback_data=f'cancel_trade_buyer_{trade_id}'))
         
         bot.send_message(user_id, buyer_message, reply_markup=markup)
         
@@ -207,11 +208,88 @@ def process_join_trade(message, trade_unique_id):
             "⏳ Ожидайте оплаты от покупателя..."
         )
         
-        bot.send_message(seller_id, seller_message)
+        markup_seller = types.InlineKeyboardMarkup()
+        markup_seller.row(types.InlineKeyboardButton('❌ Отменить сделку', callback_data=f'cancel_trade_seller_{trade_id}'))
+        
+        bot.send_message(seller_id, seller_message, reply_markup=markup_seller)
         
     except Exception as e:
         print(f"❌ Ошибка присоединения: {e}")
         bot.send_message(message.chat.id, "❌ Ошибка присоединения к сделке")
+
+# ФУНКЦИЯ ОТМЕНЫ СДЕЛКИ
+@bot.callback_query_handler(func=lambda call: call.data.startswith(('cancel_trade_seller_', 'cancel_trade_buyer_')))
+def handle_trade_cancellation(call):
+    data_parts = call.data.split('_')
+    user_type = data_parts[2]  # seller или buyer
+    trade_id = int(data_parts[3])
+    user_id = call.from_user.id
+    
+    try:
+        conn = sqlite3.connect('trades.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        # Получаем информацию о сделке
+        cursor.execute('SELECT * FROM trades WHERE id = ?', (trade_id,))
+        trade = cursor.fetchone()
+        
+        if not trade:
+            bot.answer_callback_query(call.id, "❌ Сделка не найдена")
+            conn.close()
+            return
+        
+        (trade_id, trade_unique_id, seller_id, seller_username, 
+         buyer_id, buyer_username, nft_url, description, price, 
+         currency, status, created_at) = trade
+        
+        # Проверяем права пользователя на отмену
+        if user_type == 'seller' and user_id != seller_id:
+            bot.answer_callback_query(call.id, "❌ Только продавец может отменить сделку")
+            conn.close()
+            return
+        elif user_type == 'buyer' and user_id != buyer_id:
+            bot.answer_callback_query(call.id, "❌ Только покупатель может отменить сделку")
+            conn.close()
+            return
+        
+        # Обновляем статус сделки
+        cursor.execute('UPDATE trades SET status = ? WHERE id = ?', ('cancelled', trade_id))
+        conn.commit()
+        conn.close()
+        
+        # Уведомление об отмене
+        if user_type == 'seller':
+            cancel_reason = "продавцом"
+            # Уведомляем покупателя
+            if buyer_id:
+                bot.send_message(buyer_id, 
+                               f"❌ Сделка отменена продавцом\n\n"
+                               f"🎁 Сделка #{trade_id}\n"
+                               f"💰 {price} {CURRENCIES[currency]}\n\n"
+                               f"💡 Продавец отменил сделку. Средства не были списаны.")
+        else:  # buyer
+            cancel_reason = "покупателем"
+            # Уведомляем продавца
+            bot.send_message(seller_id, 
+                           f"❌ Сделка отменена покупателем\n\n"
+                           f"🎁 Сделка #{trade_id}\n"
+                           f"💰 {price} {CURRENCIES[currency]}\n\n"
+                           f"💡 Покупатель отменил сделку.")
+        
+        # Уведомление инициатору отмены
+        bot.edit_message_text(
+            f"✅ Сделка успешно отменена\n\n"
+            f"🎁 Сделка #{trade_id}\n"
+            f"💰 {price} {CURRENCIES[currency]}\n\n"
+            f"💡 Сделка отменена {cancel_reason}",
+            call.message.chat.id, call.message.message_id
+        )
+        
+        print(f"✅ Сделка {trade_id} отменена {user_type} {user_id}")
+        
+    except Exception as e:
+        bot.answer_callback_query(call.id, "❌ Ошибка отмены сделки")
+        print(f"❌ Ошибка отмены сделки: {e}")
 
 # Баланс пользователя
 @bot.message_handler(func=lambda message: message.text == '💳 Баланс')
@@ -359,13 +437,21 @@ def show_trade_preview(chat_id, user_id):
     markup = types.InlineKeyboardMarkup()
     markup.row(
         types.InlineKeyboardButton('✅ Подтвердить', callback_data='confirm_trade'),
-        types.InlineKeyboardButton('❌ Отменить', callback_data='cancel_trade')
+        types.InlineKeyboardButton('❌ Отменить', callback_data='cancel_trade_creation')
     )
     
     bot.send_message(chat_id, preview_text, reply_markup=markup)
 
+# Отмена создания сделки
+@bot.callback_query_handler(func=lambda call: call.data == 'cancel_trade_creation')
+def cancel_trade_creation(call):
+    user_id = call.from_user.id
+    bot.edit_message_text("❌ Создание сделки отменено", call.message.chat.id, call.message.message_id)
+    if user_id in user_data:
+        del user_data[user_id]
+
 # Подтверждение сделки
-@bot.callback_query_handler(func=lambda call: call.data in ['confirm_trade', 'cancel_trade'])
+@bot.callback_query_handler(func=lambda call: call.data == 'confirm_trade')
 def handle_trade_confirmation(call):
     user_id = call.from_user.id
     
@@ -491,13 +577,15 @@ def handle_payment_start(call):
             payment_text += f"💳 Оплата {CURRENCIES[currency]}:\nУбедитесь что у вас привязана карта и достаточно средств"
             markup.row(types.InlineKeyboardButton('💳 Я оплатил(а) картой', callback_data=f'confirm_payment_{trade_id}'))
         
+        markup.row(types.InlineKeyboardButton('❌ Отменить сделку', callback_data=f'cancel_trade_buyer_{trade_id}'))
+        
         bot.edit_message_text(payment_text, call.message.chat.id, call.message.message_id, 
                              reply_markup=markup)
         
     except Exception as e:
         bot.answer_callback_query(call.id, "❌ Ошибка оплаты")
 
-# Мои сделки
+# Мои сделки - ОБНОВЛЕННАЯ ВЕРСИЯ С КНОПКАМИ ОТМЕНЫ
 @bot.message_handler(func=lambda message: message.text == '💼 Мои сделки')
 def my_trades(message):
     user_id = message.from_user.id
@@ -522,17 +610,17 @@ def my_trades(message):
         if seller_trades:
             bot.send_message(message.chat.id, "🏪 Сделки где вы продавец:")
             for trade in seller_trades:
-                show_trade_info(message.chat.id, trade, 'seller')
+                show_trade_info(message.chat.id, trade, 'seller', user_id)
         
         if buyer_trades:
             bot.send_message(message.chat.id, "🛒 Сделки где вы покупатель:")
             for trade in buyer_trades:
-                show_trade_info(message.chat.id, trade, 'buyer')
+                show_trade_info(message.chat.id, trade, 'buyer', user_id)
                 
     except Exception as e:
         bot.send_message(message.chat.id, "❌ Ошибка загрузки сделок")
 
-def show_trade_info(chat_id, trade, role):
+def show_trade_info(chat_id, trade, role, user_id):
     try:
         (trade_id, trade_unique_id, seller_id, seller_username, 
          buyer_id, buyer_username, nft_url, description, price, 
@@ -557,12 +645,21 @@ def show_trade_info(chat_id, trade, role):
         elif role == 'buyer':
             text += f"\n👤 Продавец: {seller_username}"
         
+        markup = types.InlineKeyboardMarkup()
+        
+        # Добавляем кнопку отмены для активных сделок
+        if status in ['waiting_buyer', 'waiting_payment']:
+            if role == 'seller':
+                markup.row(types.InlineKeyboardButton('❌ Отменить сделку', callback_data=f'cancel_trade_seller_{trade_id}'))
+            elif role == 'buyer':
+                markup.row(types.InlineKeyboardButton('❌ Отменить сделку', callback_data=f'cancel_trade_buyer_{trade_id}'))
+        
         # Если это продавец и сделка ожидает покупателя, показываем ссылку
         if role == 'seller' and status == 'waiting_buyer':
             join_link = f"https://t.me/{bot.get_me().username}?start=join_{trade_unique_id}"
             text += f"\n🔗 Ссылка: {join_link}"
         
-        bot.send_message(chat_id, text)
+        bot.send_message(chat_id, text, reply_markup=markup)
     except Exception as e:
         print(f"❌ Ошибка показа сделки: {e}")
 
